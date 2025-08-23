@@ -21,7 +21,7 @@
 
 <div id="ui-fixed">
 	<div class="speed">
-		<h1>{(speed * 3.6).toFixed(0)}</h1>
+		<h1>{(Math.abs(speed) * 3.6).toFixed(0)}</h1>
 		<h2>KM POR HORA</h2>
 	</div>
 	<div class="distance">
