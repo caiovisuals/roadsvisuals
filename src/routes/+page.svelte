@@ -25,8 +25,8 @@
 		<h2>KM POR HORA</h2>
 	</div>
 	<div class="distance">
-		<h1>{distance.toFixed(2)}</h1>
-		<h2>QUILÔMETROS</h2>
+		<h1>{Math.floor(distance)}</h1>
+		<h2>QUILÔMETROS RODADOS</h2>
 	</div>
 </div>
 

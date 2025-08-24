@@ -2,16 +2,18 @@ import * as THREE from "three";
 
 export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, distance: number) => void) {
 	let gameTime = 0;
-	const gameDayDuration = 12 * 60 * 60;
+	const gameDayDuration = 12 * 30 * 30;
+	const gravity = -9.81;
 
 	let cameraAngleOffset = 0;
 	let targetCameraAngleOffset = 0;
-	const maxCameraOffsetAngle = Math.PI / 44;
+	const maxCameraOffsetAngle = Math.PI / 40;
 
 	let isRain = false;
 	let rainIntensity = 0;
 
 	let velocity = 0;
+	let verticalVelocity = 0;
 	let acceleration = 0;
 	const mass = 1350;
 	const gears = 6;
@@ -59,7 +61,7 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 		color: 0xaaaaaa,
 		size: 0.1,
 		transparent: true,
-		opacity: 0.6,
+		opacity: 0.45,
 	});
 	
 	const rain = new THREE.Points(rainGeometry, rainMaterial);
@@ -67,59 +69,95 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 
 	// === CÂMERA E RENDERER ===
 	const minCameraDistance = 7;
-	const maxCameraDistance = 7.8;
+	const maxCameraDistance = 7.6;
+
+	const minCameraFov = 75;
+	const maxCameraFov = 82;
 	
 	let currentCameraDistance = minCameraDistance;
 
-	const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+	let currentCameraFov = minCameraFov;
+
+	const camera = new THREE.PerspectiveCamera(currentCameraFov, window.innerWidth / window.innerHeight, 0.1, 1000);
 	const renderer = new THREE.WebGLRenderer({ canvas });
 	renderer.setSize(window.innerWidth, window.innerHeight);
+	
+	// === SOMBRAS ===
+	renderer.shadowMap.enabled = true;
 	renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
+	
 	// === ILUMINAÇÃO ===
 	const ambientLight = new THREE.AmbientLight(0xffffff, 1);
 	scene.add(ambientLight);
+	
+	const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+	directionalLight.position.set(500, 500, 500);
+	directionalLight.castShadow = true;
 
-	const directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
-	directionalLight.position.set(10, 10, 10);
+	directionalLight.shadow.mapSize.width = 16384;
+	directionalLight.shadow.mapSize.height = 16384;
+	directionalLight.shadow.camera.near = 0.5;
+	directionalLight.shadow.camera.far = 2000;
+	directionalLight.shadow.camera.left = -600;
+	directionalLight.shadow.camera.right = 600;
+	directionalLight.shadow.camera.top = 600;
+	directionalLight.shadow.camera.bottom = -600;
+
 	scene.add(directionalLight);
 
 	// === CARRO ===
 		// === MATERIAIS ===
-		const carMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+		const carMaterial = new THREE.MeshStandardMaterial({ 
+			color: 0xff0000,
+			roughness: 0.25,
+		});
 		const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
 		const headLightMaterial = new THREE.MeshStandardMaterial({
-			color: 0x111111,
-			emissive: 0xff0000,
-			emissiveIntensity: 1.5
+			color: 0xFF0000,
 		});
 
-		// === CORPO ===
-		const carGeometry = new THREE.BoxGeometry(2, 1.5, 4.5);
-		const carMesh = new THREE.Mesh(carGeometry, carMaterial);
-		carMesh.position.y = 1;
+		// === CORPO BAIXO ===
+		const carDownGeometry = new THREE.BoxGeometry(2, 0.75, 4.5);
+		const carDownMesh = new THREE.Mesh(carDownGeometry, carMaterial);
+		carDownMesh.castShadow = true;
+		carDownMesh.receiveShadow = true;
+		carDownMesh.position.y = 0.40;
+
+		// === CORPO CIMA ===
+		const carTopGeometry = new THREE.BoxGeometry(2, 0.75, 3);
+		const carTopMesh = new THREE.Mesh(carTopGeometry, carMaterial);
+		carTopMesh.castShadow = true;
+		carTopMesh.receiveShadow = true;
+		carTopMesh.position.y = 1.15;
+		carTopMesh.position.z = 0.2;
 
 		// === RODAS ===
 		const wheelGeometry = new THREE.CylinderGeometry(0.43, 0.43, 0.225, 32);
 		
-		// Rodas traseiras (fixas)
+		// Rodas traseiras
 		function createRearWheel(x: number, z: number) {
 			const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
 			wheel.rotation.z = Math.PI / 2;
-			wheel.position.set(x, 0.2, z);
+			wheel.position.set(x, 0, z);
+
+			wheel.castShadow = true;
+			wheel.receiveShadow = true;
+
 			return wheel;
 		}
 
-		// Rodas dianteiras (steering)
+		// Rodas dianteiras
 		function createFrontWheel(x: number, z: number) {
 			const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
 			wheel.rotation.z = Math.PI / 2;
+			
+			wheel.castShadow = true;
+			wheel.receiveShadow = true;
 
 			const wheelGroup = new THREE.Group();
-			wheelGroup.position.set(x, 0.2, z);
+			wheelGroup.position.set(x, 0, z);
 			wheelGroup.add(wheel);
 
-			// Guardamos referência direta à roda dentro do grupo
 			(wheelGroup as any).wheelMesh = wheel;
 
 			return wheelGroup;
@@ -135,17 +173,17 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 
 		function createHeadLight(x: number, y: number, z: number) {
 			const headLight = new THREE.Mesh(headlightGeometry, headLightMaterial);
-			headLight.rotation.x = Math.PI / 2; // Aponta para frente
+			headLight.rotation.x = Math.PI / 2;
 			headLight.position.set(x, y, z);
 			return headLight;
 		}
 
-		const rearLightRight = createHeadLight(0.75, 0.6, 2.25);
-		const rearLightLeft = createHeadLight(-0.75, 0.6, 2.25);
+		const rearLightRight = createHeadLight(0.75, 0.65, 2.25);
+		const rearLightLeft = createHeadLight(-0.75, 0.65, 2.25);
 
 		// === AGRUPANDO O CARRO ===
 		const car = new THREE.Group();
-		car.add(carMesh, frontRightWheel, frontLeftWheel, rearRightWheel, rearLeftWheel, rearLightRight, rearLightLeft);
+		car.add(carTopMesh, carDownMesh, frontRightWheel, frontLeftWheel, rearRightWheel, rearLeftWheel, rearLightRight, rearLightLeft);
 		scene.add(car);
 
 	// === ARVÓRE ===
@@ -156,15 +194,21 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 		const trunkGeo = new THREE.CylinderGeometry(0.1, 0.1, 2.5);
 		const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8b4513 });
 		const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+		trunk.castShadow = true;
+		trunk.receiveShadow = true;
 		trunk.position.y = 0;
 		tree.add(trunk);
 
 		// Folhagem
-		const leavesGeo = new THREE.ConeGeometry(0.5, 2, 64);
+		const base = getRandomInRange(0.5, 0.6);
+		const height = getRandomInRange(2, 2.2);
+		const leavesGeo = new THREE.ConeGeometry(base, height, 64);
 		const leavesColor = getRandomLeavesColor();
 		const leavesMat = new THREE.MeshStandardMaterial({ color: leavesColor });
 		const leaves = new THREE.Mesh(leavesGeo, leavesMat);
-		leaves.position.y = 1 + Math.random() * 1.2;
+		leaves.castShadow = true;
+		leaves.receiveShadow = true;
+		leaves.position.y = 1 + Math.random() * 1.1;
 		tree.add(leaves);
 
 		tree.position.set(x, 0, z);
@@ -196,7 +240,7 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 	}
 
 	const minTrees = 750;
-	const maxTrees = 1000;
+	const maxTrees = 1200;
 	const numberOfTrees = Math.floor(Math.random() * (maxTrees - minTrees + 1)) + minTrees;
 
 	const posMin = -500;
@@ -237,8 +281,10 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 
 	const planeMaterial = new THREE.MeshStandardMaterial({ color: 0xA39A6D });
 	const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+
 	plane.rotation.x = -Math.PI / 2;
 	plane.position.y = -0.25;
+	plane.receiveShadow = true;
 	scene.add(plane);
 
 	const keys: Record<string, boolean> = {};
@@ -256,6 +302,18 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 		gameTime += delta;
 		if (gameTime > gameDayDuration) gameTime -= gameDayDuration;
 
+		// ===== GRAVIDADE =====
+		const carBottomY = 0.55 - 0.375;
+		const groundY = 0;
+
+		verticalVelocity += gravity * delta;
+		car.position.y += verticalVelocity * delta;
+
+		if (car.position.y - carBottomY <= groundY) {
+			car.position.y = groundY + carBottomY;
+			verticalVelocity = 0;
+		}
+
 		// ===== CONTROLES =====
 		let throttle = 0;
 		let brake = 0;
@@ -263,10 +321,8 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 		if (keys["w"] || keys["arrowup"]) throttle = 1;
 		if (keys["s"] || keys["arrowdown"]) {
 			if (velocity > 0.5) {
-				// freia se já estiver andando pra frente
 				brake = 1;
 			} else {
-				// acelera pra trás se parado ou já indo em ré
 				throttle = -1;
 			}
 		}
@@ -275,35 +331,35 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 		let handBrake = keys[" "] ? 1 : 0;
 
 		// ===== FORÇAS =====
-		// Força de tração (F = m * a)
-		const engineForce = throttle * accelerationRate * mass;
+			// Força de tração (F = m * a)
+			const engineForce = throttle * accelerationRate * mass;
 
-		// Força de frenagem (considera freio normal + freio de mão)
-		const brakeForceTotal = brake * brakeForce * mass + handBrake * brakeForce * 1.5 * mass;
+			// Força de frenagem (considera freio normal + freio de mão)
+			const brakeForceTotal = brake * brakeForce * mass + handBrake * brakeForce * 1.5 * mass;
 
-		// Resistência do ar (quadrática na velocidade)
-		const airResistance = drag * velocity * Math.abs(velocity);
+			// Resistência do ar (quadrática na velocidade)
+			const airResistance = drag * velocity * Math.abs(velocity);
 
-		// Atrito de rolamento (sempre contrário ao movimento)
-		const rolling = rollingResistance * velocity;
+			// Atrito de rolamento (sempre contrário ao movimento)
+			const rolling = rollingResistance * velocity;
 
-		// Força resultante
-		const netForce = engineForce - brakeForceTotal * Math.sign(velocity) - airResistance - rolling;
+			// Força resultante
+			const netForce = engineForce - brakeForceTotal * Math.sign(velocity) - airResistance - rolling;
 
-		// Aceleração final (F = m*a)
-		const netAcceleration = netForce / mass;
+			// Aceleração final (F = m*a)
+			const netAcceleration = netForce / mass;
 
-		// Atualiza velocidade
-		velocity += netAcceleration * delta;
+			// Atualiza velocidade
+			velocity += netAcceleration * delta;
 
-		// Limites de velocidade
-		if (velocity > maxForwardSpeed) velocity = maxForwardSpeed;
-		if (velocity < maxReverseSpeed) velocity = maxReverseSpeed;
+			// Limites de velocidade
+			if (velocity > maxForwardSpeed) velocity = maxForwardSpeed;
+			if (velocity < maxReverseSpeed) velocity = maxReverseSpeed;
 
-		// Se a velocidade for muito baixa, zera (evita drift infinito)
-		if (Math.abs(velocity) < 0.05 && throttle === 0 && brake === 0 && handBrake === 0) {
-			velocity = 0;
-		}
+			// Se a velocidade for muito baixa, zera (evita drift infinito)
+			if (Math.abs(velocity) < 0.05 && throttle === 0 && brake === 0 && handBrake === 0) {
+				velocity = 0;
+			}
 
 		// ===== DIREÇÃO =====
 		if (Math.abs(velocity) > 0.2) {
@@ -334,10 +390,29 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 		rearLeftWheel.rotation.y = 0;
 		rearRightWheel.rotation.y = 0;
 
+
+		// ===== Luzes traseiras =====
 		const brakingOrReversing = brake > 0 || handBrake > 0 || throttle < 0;
 
-		(rearLightRight.material as THREE.MeshStandardMaterial).color.set(brakingOrReversing ? 0xA00000 : 0x440000);
-		(rearLightLeft.material as THREE.MeshStandardMaterial).color.set(brakingOrReversing ? 0xA00000 : 0x440000);
+		const rearLightMaterialRight = rearLightRight.material as THREE.MeshStandardMaterial;
+		const rearLightMaterialLeft = rearLightLeft.material as THREE.MeshStandardMaterial;
+
+		if (brakingOrReversing) {
+			rearLightMaterialRight.color.set(0xA00000);
+			rearLightMaterialLeft.color.set(0xA00000);
+
+			rearLightMaterialRight.emissive.set(0xFF0000);
+			rearLightMaterialRight.emissiveIntensity = 1.5;
+
+			rearLightMaterialLeft.emissive.set(0xFF0000);
+			rearLightMaterialLeft.emissiveIntensity = 1.5;
+		} else {
+			rearLightMaterialRight.color.set(0x440000);
+			rearLightMaterialLeft.color.set(0x440000);
+
+			rearLightMaterialRight.emissive.set(0x000000);
+			rearLightMaterialLeft.emissive.set(0x000000);
+		}
 
 		// ===== MOVIMENTO =====
 		const forward = new THREE.Vector3(0, 0, -1).applyEuler(car.rotation).normalize();
@@ -346,6 +421,10 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 
 		// Distância total
 		distanceTraveled += Math.abs(moveDistance);
+
+		const mapLimit = 500;
+		if (Math.abs(car.position.x) > mapLimit) car.position.x = Math.sign(car.position.x) * mapLimit;
+		if (Math.abs(car.position.z) > mapLimit) car.position.z = Math.sign(car.position.z) * mapLimit;
 
 		// ===== CÂMERA =====
 		if (keys["a"] || keys["arrowleft"]) {
@@ -359,12 +438,16 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 		cameraAngleOffset += (targetCameraAngleOffset - cameraAngleOffset) * 4 * delta;
 
 		const speedRatio = Math.min(Math.abs(velocity) / maxForwardSpeed, 1);
+		
     	const targetCameraDistance = THREE.MathUtils.lerp(minCameraDistance, maxCameraDistance, speedRatio);
-
 		currentCameraDistance += (targetCameraDistance - currentCameraDistance) * 2 * delta;
 
-		const baseOffset = new THREE.Vector3(0, 3, currentCameraDistance);
+		const targetCameraFov = THREE.MathUtils.lerp(minCameraFov, maxCameraFov, speedRatio);
+		currentCameraFov += (targetCameraFov - currentCameraFov) * 2 * delta;
+		camera.fov = currentCameraFov;
+		camera.updateProjectionMatrix();
 
+		const baseOffset = new THREE.Vector3(0, 3, currentCameraDistance);
 		const rotatedOffset = baseOffset.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), cameraAngleOffset);
 		const cameraOffset = rotatedOffset.applyEuler(car.rotation);
 
