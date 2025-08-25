@@ -1,8 +1,8 @@
 import * as THREE from "three";
 
-export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, distance: number) => void) {
+export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, distance: number) => void) {
 	let gameTime = 0;
-	const gameDayDuration = 12 * 30 * 30;
+	const gameDayDuration = 6 * 15 * 15;
 	const gravity = -9.81;
 
 	let cameraAngleOffset = 0;
@@ -36,13 +36,25 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 
 	const scene = new THREE.Scene();
 
+	// === FUNÇÃO PARA PEGAR HORÁRIO DE BRASÍLIA VIA API ===
+	async function fetchBrasiliaTime(): Promise<number> {
+		try {
+		const response = await fetch("http://worldtimeapi.org/api/timezone/America/Sao_Paulo");
+		const data = await response.json();
+		const date = new Date(data.datetime);
+		const totalSeconds = date.getHours() * 3600 + date.getMinutes() * 60 + date.getSeconds();
+		return totalSeconds * 4;
+		} catch (err) {
+		console.error("Erro ao pegar hora de Brasília:", err);
+		return 0;
+		}
+	}
+
+	gameTime = await fetchBrasiliaTime() % gameDayDuration;
+
 	// === CÉU ===
 	const skyDayColor = new THREE.Color(0x87ceeb);
-	const skySunsetColor = new THREE.Color(0xffa50c)
-
-	const timeRatio = gameTime / gameDayDuration;
-	const skyColor = skyDayColor.clone().lerp(skySunsetColor, Math.sin(timeRatio * Math.PI));
-	scene.background = skyColor;
+	const skySunsetColor = new THREE.Color(0xe5910b);
 
 	// === CHUVA ===
 	const rainCount = 1000;
@@ -112,8 +124,11 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 			roughness: 0.25,
 		});
 		const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
-		const headLightMaterial = new THREE.MeshStandardMaterial({
+		const rearLightMaterial = new THREE.MeshStandardMaterial({
 			color: 0xFF0000,
+		});
+		const headLightMaterial = new THREE.MeshStandardMaterial({
+			color: 0xFFFFFF,
 		});
 
 		// === CORPO BAIXO ===
@@ -124,12 +139,30 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 		carDownMesh.position.y = 0.40;
 
 		// === CORPO CIMA ===
-		const carTopGeometry = new THREE.BoxGeometry(2, 0.75, 3);
+		const carTopGeometry = new THREE.BoxGeometry(2, 0.75, 3.2);
 		const carTopMesh = new THREE.Mesh(carTopGeometry, carMaterial);
+
+		const positions = carTopGeometry.attributes.position;
+		const vertex = new THREE.Vector3();
+
+		for (let i = 0; i < positions.count; i++) {
+		vertex.fromBufferAttribute(positions, i);
+
+		if (vertex.y > 0) {
+			vertex.x *= 0.75;
+			vertex.z *= 0.55;
+		}
+
+		positions.setXYZ(i, vertex.x, vertex.y, vertex.z);
+		}
+
+		// Recalcula normais para iluminação correta
+		carTopGeometry.computeVertexNormals();
+
 		carTopMesh.castShadow = true;
 		carTopMesh.receiveShadow = true;
 		carTopMesh.position.y = 1.15;
-		carTopMesh.position.z = 0.2;
+		carTopMesh.position.z = 0.12;
 
 		// === RODAS ===
 		const wheelGeometry = new THREE.CylinderGeometry(0.43, 0.43, 0.225, 32);
@@ -168,8 +201,22 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 		const frontRightWheel = createFrontWheel(0.95, -1.5);
 		const frontLeftWheel = createFrontWheel(-0.95, -1.5);
 
-		// == FAROIS ===
-		const headlightGeometry = new THREE.BoxGeometry(0.3, 0.1, 0.15);
+		// == FAROIS TRASEIROS ===
+		const rearlightGeometry = new THREE.BoxGeometry(0.3, 0.1, 0.15);
+
+		function createRearLight(x: number, y: number, z: number) {
+			const rearLight = new THREE.Mesh(rearlightGeometry, rearLightMaterial);
+			rearLight.rotation.x = Math.PI / 2;
+			rearLight.position.set(x, y, z);
+			return rearLight;
+		}
+
+		const rearLightRight = createRearLight(0.75, 0.60, 2.25);
+		const rearLightLeft = createRearLight(-0.75, 0.60, 2.25);
+
+		// == FAROIS DIANTEIROS ===
+
+		const headlightGeometry = new THREE.BoxGeometry(0.4, 0.25, 0.15);
 
 		function createHeadLight(x: number, y: number, z: number) {
 			const headLight = new THREE.Mesh(headlightGeometry, headLightMaterial);
@@ -178,12 +225,28 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 			return headLight;
 		}
 
-		const rearLightRight = createHeadLight(0.75, 0.65, 2.25);
-		const rearLightLeft = createHeadLight(-0.75, 0.65, 2.25);
+		const headLightRight = createHeadLight(0.82, 0.60, -2.18);
+		const headLightLeft = createHeadLight(-0.82, 0.60, -2.18);
+
+		// === RETROVISORES ===
+		const mirrorGeometry = new THREE.BoxGeometry(0.4, 0.18, 0.05);
+
+		// Função para criar retrovisor
+		function createMirror(x: number, y: number, z: number) {
+			const mirror = new THREE.Mesh(mirrorGeometry, carMaterial);
+			mirror.position.set(x, y, z);
+			mirror.castShadow = true;
+			mirror.receiveShadow = true;
+			return mirror;
+		}
+
+		// Retrovisores direito e esquerdo
+		const rightMirror1 = createMirror(1.1, 0.90, -1);
+		const leftMirror1 = createMirror(-1.1, 0.90, -1);
 
 		// === AGRUPANDO O CARRO ===
 		const car = new THREE.Group();
-		car.add(carTopMesh, carDownMesh, frontRightWheel, frontLeftWheel, rearRightWheel, rearLeftWheel, rearLightRight, rearLightLeft);
+		car.add(carTopMesh, carDownMesh, frontRightWheel, frontLeftWheel, rearRightWheel, rearLeftWheel, rearLightRight, rearLightLeft, headLightRight, headLightLeft, rightMirror1, leftMirror1);
 		scene.add(car);
 
 	// === ARVÓRE ===
@@ -211,7 +274,9 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 		leaves.position.y = 1 + Math.random() * 1.1;
 		tree.add(leaves);
 
+		const box = new THREE.Box3().setFromObject(tree);
 		tree.position.set(x, 0, z);
+		placedTrees.push({ x, z });
 
 		return tree;
 	}
@@ -248,6 +313,7 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 	let treesCount = 0;
 
 	const placedTrees: { x: number; z: number }[] = [];
+	const treeBoxes: THREE.Box3[] = [];
 
 	function isFarFromOtherTrees(x: number, z: number, minDistance = minTreeDistance) {
 		for (const tree of placedTrees) {
@@ -301,6 +367,18 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 
 		gameTime += delta;
 		if (gameTime > gameDayDuration) gameTime -= gameDayDuration;
+
+		// ===== CÉU =====
+		const timeRatio = gameTime / gameDayDuration;
+		const skyColor = skyDayColor.clone().lerp(skySunsetColor, Math.sin(timeRatio * Math.PI));
+		scene.background = skyColor;
+
+		// ===== LUZ AMBIENTE VARIÁVEL =====
+		const ambientIntensity = THREE.MathUtils.lerp(1, 0.8, Math.sin(timeRatio * Math.PI));
+		ambientLight.intensity = ambientIntensity;
+
+		const directionalIntensity = THREE.MathUtils.lerp(1, 0.55, Math.sin(timeRatio * Math.PI));
+		directionalLight.intensity = directionalIntensity;
 
 		// ===== GRAVIDADE =====
 		const carBottomY = 0.55 - 0.375;
@@ -390,7 +468,6 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 		rearLeftWheel.rotation.y = 0;
 		rearRightWheel.rotation.y = 0;
 
-
 		// ===== Luzes traseiras =====
 		const brakingOrReversing = brake > 0 || handBrake > 0 || throttle < 0;
 
@@ -419,12 +496,23 @@ export function initScene(canvas: HTMLCanvasElement, updateUI: (speed: number, d
 		const moveDistance = velocity * delta;
 		car.position.add(forward.multiplyScalar(moveDistance));
 
+		// ===== COLISÕES =====
+		const carBox = new THREE.Box3().setFromObject(car);
+		for (let i = 0; i < treeBoxes.length; i++) {
+			const treeBox = treeBoxes[i];
+			if (carBox.intersectsBox(treeBox)) {
+				car.position.add(forward.clone().multiplyScalar(-0.5));
+				velocity = 0;
+				break;
+			}
+		}
+
 		// Distância total
 		distanceTraveled += Math.abs(moveDistance);
 
 		const mapLimit = 500;
-		if (Math.abs(car.position.x) > mapLimit) car.position.x = Math.sign(car.position.x) * mapLimit;
-		if (Math.abs(car.position.z) > mapLimit) car.position.z = Math.sign(car.position.z) * mapLimit;
+		if (Math.abs(car.position.x) > mapLimit) { car.position.x = Math.sign(car.position.x) * mapLimit; velocity = 0; }
+		if (Math.abs(car.position.z) > mapLimit) { car.position.z = Math.sign(car.position.z) * mapLimit; velocity = 0; }
 
 		// ===== CÂMERA =====
 		if (keys["a"] || keys["arrowleft"]) {
