@@ -25,7 +25,7 @@
 		<h2>KM POR HORA</h2>
 	</div>
 	<div class="distance">
-		<h1>{Math.floor(distance)}</h1>
+		<h1>{Math.floor(distance / 1000)}</h1>
 		<h2>QUILÔMETROS RODADOS</h2>
 	</div>
 </div>

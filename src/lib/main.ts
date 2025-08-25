@@ -15,18 +15,25 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 	let velocity = 0;
 	let verticalVelocity = 0;
 	let acceleration = 0;
+
 	const mass = 1350;
+
 	const gears = 6;
+	const gearRatios = [3.6, 2.1, 1.3, 1.0, 0.8, 0.6];
 	let currentGear = 0;
+	
 	const maxForwardSpeed = 70;
 	const maxReverseSpeed = -15;
 	const accelerationRate = 10;
+	const dragCoeff = 0.32;  
 	const brakeForce = 40;
 	const steeringAngle = Math.PI * 2.2;
 	const turnSpeed = 4.2;
 	const drag = 5;
 	const rollingResistance = 1.5;
 	let steering = 0;
+
+	let headlightsOn = true;
 	
 	const minTreeDistance = 12;
 
@@ -36,86 +43,93 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 
 	const scene = new THREE.Scene();
 
-	// === FUNÇÃO PARA PEGAR HORÁRIO DE BRASÍLIA VIA API ===
-	async function fetchBrasiliaTime(): Promise<number> {
-		try {
-		const response = await fetch("http://worldtimeapi.org/api/timezone/America/Sao_Paulo");
-		const data = await response.json();
-		const date = new Date(data.datetime);
-		const totalSeconds = date.getHours() * 3600 + date.getMinutes() * 60 + date.getSeconds();
-		return totalSeconds * 4;
-		} catch (err) {
-		console.error("Erro ao pegar hora de Brasília:", err);
-		return 0;
-		}
-	}
+	let lastTime = performance.now();
+	const cameraTarget = new THREE.Object3D();
+	scene.add(cameraTarget);
 
-	gameTime = await fetchBrasiliaTime() % gameDayDuration;
+	const keys: Record<string, boolean> = {};
+
+	// === FUNÇÃO PARA PEGAR HORÁRIO DE BRASÍLIA VIA API ===
+		async function fetchBrasiliaTime(): Promise<number> {
+			try {
+			const response = await fetch("http://worldtimeapi.org/api/timezone/America/Sao_Paulo");
+			const data = await response.json();
+			const date = new Date(data.datetime);
+			const totalSeconds = date.getHours() * 3600 + date.getMinutes() * 60 + date.getSeconds();
+			return totalSeconds * 4;
+			} catch (err) {
+			console.error("Erro ao pegar hora de Brasília:", err);
+			return 0;
+			}
+		}
+
+		gameTime = await fetchBrasiliaTime() % gameDayDuration;
 
 	// === CÉU ===
-	const skyDayColor = new THREE.Color(0x87ceeb);
-	const skySunsetColor = new THREE.Color(0xe5910b);
+		const skyDayColor = new THREE.Color(0x87ceeb);
+		const skySunsetColor = new THREE.Color(0xe5910b);
 
 	// === CHUVA ===
-	const rainCount = 1000;
-	const rainGeometry = new THREE.BufferGeometry();
-	const rainPositions = new Float32Array(rainCount * 3);
+		const rainCount = 1000;
+		const rainGeometry = new THREE.BufferGeometry();
+		const rainPositions = new Float32Array(rainCount * 3);
 
-	for (let i = 0; i < rainCount; i++) {
-		rainPositions[i * 3] = Math.random() * 1000 - 500;
-		rainPositions[i * 3 + 1] = Math.random() * 200 + 20;
-		rainPositions[i * 3 + 2] = Math.random() * 1000 - 500;
-	}
+		for (let i = 0; i < rainCount; i++) {
+			rainPositions[i * 3] = Math.random() * 1000 - 500;
+			rainPositions[i * 3 + 1] = Math.random() * 200 + 20;
+			rainPositions[i * 3 + 2] = Math.random() * 1000 - 500;
+		}
 
-	rainGeometry.setAttribute("position", new THREE.BufferAttribute(rainPositions, 3));
+		rainGeometry.setAttribute("position", new THREE.BufferAttribute(rainPositions, 3));
 
-	const rainMaterial = new THREE.PointsMaterial({
-		color: 0xaaaaaa,
-		size: 0.1,
-		transparent: true,
-		opacity: 0.45,
-	});
-	
-	const rain = new THREE.Points(rainGeometry, rainMaterial);
-	scene.add(rain);
+		const rainMaterial = new THREE.PointsMaterial({
+			color: 0xaaaaaa,
+			size: 0.1,
+			transparent: true,
+			opacity: 0.45,
+			sizeAttenuation: true,
+		});
+		
+		const rain = new THREE.Points(rainGeometry, rainMaterial);
+		scene.add(rain);
 
 	// === CÂMERA E RENDERER ===
-	const minCameraDistance = 7;
-	const maxCameraDistance = 7.6;
+		const minCameraDistance = 7;
+		const maxCameraDistance = 7.6;
 
-	const minCameraFov = 75;
-	const maxCameraFov = 82;
-	
-	let currentCameraDistance = minCameraDistance;
+		const minCameraFov = 75;
+		const maxCameraFov = 82;
+		
+		let currentCameraDistance = minCameraDistance;
 
-	let currentCameraFov = minCameraFov;
+		let currentCameraFov = minCameraFov;
 
-	const camera = new THREE.PerspectiveCamera(currentCameraFov, window.innerWidth / window.innerHeight, 0.1, 1000);
-	const renderer = new THREE.WebGLRenderer({ canvas });
-	renderer.setSize(window.innerWidth, window.innerHeight);
+		const camera = new THREE.PerspectiveCamera(currentCameraFov, window.innerWidth / window.innerHeight, 0.1, 1000);
+		const renderer = new THREE.WebGLRenderer({ canvas });
+		renderer.setSize(window.innerWidth, window.innerHeight);
 	
 	// === SOMBRAS ===
-	renderer.shadowMap.enabled = true;
-	renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+		renderer.shadowMap.enabled = true;
+		renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 	
 	// === ILUMINAÇÃO ===
-	const ambientLight = new THREE.AmbientLight(0xffffff, 1);
-	scene.add(ambientLight);
-	
-	const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-	directionalLight.position.set(500, 500, 500);
-	directionalLight.castShadow = true;
+		const ambientLight = new THREE.AmbientLight(0xffffff, 1);
+		scene.add(ambientLight);
+		
+		const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+		directionalLight.position.set(500, 500, 500);
+		directionalLight.castShadow = true;
 
-	directionalLight.shadow.mapSize.width = 16384;
-	directionalLight.shadow.mapSize.height = 16384;
-	directionalLight.shadow.camera.near = 0.5;
-	directionalLight.shadow.camera.far = 2000;
-	directionalLight.shadow.camera.left = -600;
-	directionalLight.shadow.camera.right = 600;
-	directionalLight.shadow.camera.top = 600;
-	directionalLight.shadow.camera.bottom = -600;
+		directionalLight.shadow.mapSize.width = 16384;
+		directionalLight.shadow.mapSize.height = 16384;
+		directionalLight.shadow.camera.near = 0.5;
+		directionalLight.shadow.camera.far = 2000;
+		directionalLight.shadow.camera.left = -600;
+		directionalLight.shadow.camera.right = 600;
+		directionalLight.shadow.camera.top = 600;
+		directionalLight.shadow.camera.bottom = -600;
 
-	scene.add(directionalLight);
+		scene.add(directionalLight);
 
 	// === CARRO ===
 		// === MATERIAIS ===
@@ -131,14 +145,14 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 			color: 0xFFFFFF,
 		});
 
-		// === CORPO BAIXO ===
+		// === CORPO DE BAIXO ===
 		const carDownGeometry = new THREE.BoxGeometry(2, 0.75, 4.5);
 		const carDownMesh = new THREE.Mesh(carDownGeometry, carMaterial);
 		carDownMesh.castShadow = true;
 		carDownMesh.receiveShadow = true;
 		carDownMesh.position.y = 0.40;
 
-		// === CORPO CIMA ===
+		// === CORPO DE CIMA ===
 		const carTopGeometry = new THREE.BoxGeometry(2, 0.75, 3.2);
 		const carTopMesh = new THREE.Mesh(carTopGeometry, carMaterial);
 
@@ -146,17 +160,14 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 		const vertex = new THREE.Vector3();
 
 		for (let i = 0; i < positions.count; i++) {
-		vertex.fromBufferAttribute(positions, i);
-
-		if (vertex.y > 0) {
-			vertex.x *= 0.75;
-			vertex.z *= 0.55;
+			vertex.fromBufferAttribute(positions, i);
+			if (vertex.y > 0) {
+				vertex.x *= 0.75;
+				vertex.z *= 0.55;
+			}
+			positions.setXYZ(i, vertex.x, vertex.y, vertex.z);
 		}
 
-		positions.setXYZ(i, vertex.x, vertex.y, vertex.z);
-		}
-
-		// Recalcula normais para iluminação correta
 		carTopGeometry.computeVertexNormals();
 
 		carTopMesh.castShadow = true;
@@ -166,72 +177,69 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 
 		// === RODAS ===
 		const wheelGeometry = new THREE.CylinderGeometry(0.43, 0.43, 0.225, 32);
-		
-		// Rodas traseiras
-		function createRearWheel(x: number, z: number) {
-			const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-			wheel.rotation.z = Math.PI / 2;
-			wheel.position.set(x, 0, z);
+			// RODAS TRASEIRAS
+			function createRearWheel(x: number, z: number) {
+				const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+				wheel.rotation.z = Math.PI / 2;
+				wheel.position.set(x, 0, z);
 
-			wheel.castShadow = true;
-			wheel.receiveShadow = true;
+				wheel.castShadow = true;
+				wheel.receiveShadow = true;
 
-			return wheel;
-		}
+				return wheel;
+			}
+			// RODAS DIANTEIRAS
+			function createFrontWheel(x: number, z: number) {
+				const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+				wheel.rotation.z = Math.PI / 2;
+				
+				wheel.castShadow = true;
+				wheel.receiveShadow = true;
 
-		// Rodas dianteiras
-		function createFrontWheel(x: number, z: number) {
-			const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-			wheel.rotation.z = Math.PI / 2;
-			
-			wheel.castShadow = true;
-			wheel.receiveShadow = true;
+				const wheelGroup = new THREE.Group();
+				wheelGroup.position.set(x, 0, z);
+				wheelGroup.add(wheel);
 
-			const wheelGroup = new THREE.Group();
-			wheelGroup.position.set(x, 0, z);
-			wheelGroup.add(wheel);
+				(wheelGroup as any).wheelMesh = wheel;
 
-			(wheelGroup as any).wheelMesh = wheel;
-
-			return wheelGroup;
-		}
+				return wheelGroup;
+			}
 
 		const rearRightWheel = createRearWheel(0.95, 1.5);
 		const rearLeftWheel = createRearWheel(-0.95, 1.5);
 		const frontRightWheel = createFrontWheel(0.95, -1.5);
 		const frontLeftWheel = createFrontWheel(-0.95, -1.5);
 
-		// == FAROIS TRASEIROS ===
-		const rearlightGeometry = new THREE.BoxGeometry(0.3, 0.1, 0.15);
+		// === FAROIS ===
+			// FAROIS TRASEIROS
+			const rearlightGeometry = new THREE.BoxGeometry(0.3, 0.1, 0.15);
 
-		function createRearLight(x: number, y: number, z: number) {
-			const rearLight = new THREE.Mesh(rearlightGeometry, rearLightMaterial);
-			rearLight.rotation.x = Math.PI / 2;
-			rearLight.position.set(x, y, z);
-			return rearLight;
-		}
+			function createRearLight(x: number, y: number, z: number) {
+				const rearLight = new THREE.Mesh(rearlightGeometry, rearLightMaterial);
+				rearLight.rotation.x = Math.PI / 2;
+				rearLight.position.set(x, y, z);
+				return rearLight;
+			}
 
-		const rearLightRight = createRearLight(0.75, 0.60, 2.25);
-		const rearLightLeft = createRearLight(-0.75, 0.60, 2.25);
+			const rearLightRight = createRearLight(0.75, 0.60, 2.25);
+			const rearLightLeft = createRearLight(-0.75, 0.60, 2.25);
+			// FAROIS DIANTEIROS
 
-		// == FAROIS DIANTEIROS ===
+			const headlightGeometry = new THREE.BoxGeometry(0.4, 0.25, 0.15);
 
-		const headlightGeometry = new THREE.BoxGeometry(0.4, 0.25, 0.15);
+			function createHeadLight(x: number, y: number, z: number) {
+				const headLight = new THREE.Mesh(headlightGeometry, headLightMaterial);
+				headLight.rotation.x = Math.PI / 2;
+				headLight.position.set(x, y, z);
+				return headLight;
+			}
 
-		function createHeadLight(x: number, y: number, z: number) {
-			const headLight = new THREE.Mesh(headlightGeometry, headLightMaterial);
-			headLight.rotation.x = Math.PI / 2;
-			headLight.position.set(x, y, z);
-			return headLight;
-		}
-
-		const headLightRight = createHeadLight(0.82, 0.60, -2.18);
-		const headLightLeft = createHeadLight(-0.82, 0.60, -2.18);
+			const headLightRight = createHeadLight(0.82, 0.60, -2.18);
+			const headLightLeft = createHeadLight(-0.82, 0.60, -2.18);
 
 		// === RETROVISORES ===
 		const mirrorGeometry = new THREE.BoxGeometry(0.4, 0.18, 0.05);
 
-		// Função para criar retrovisor
 		function createMirror(x: number, y: number, z: number) {
 			const mirror = new THREE.Mesh(mirrorGeometry, carMaterial);
 			mirror.position.set(x, y, z);
@@ -240,7 +248,6 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 			return mirror;
 		}
 
-		// Retrovisores direito e esquerdo
 		const rightMirror1 = createMirror(1.1, 0.90, -1);
 		const leftMirror1 = createMirror(-1.1, 0.90, -1);
 
@@ -249,117 +256,109 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 		car.add(carTopMesh, carDownMesh, frontRightWheel, frontLeftWheel, rearRightWheel, rearLeftWheel, rearLightRight, rearLightLeft, headLightRight, headLightLeft, rightMirror1, leftMirror1);
 		scene.add(car);
 
-	// === ARVÓRE ===
-	function createTree(x: number, z: number) {
-		const tree = new THREE.Group();
+	// === ARVÓRES ===
+		const placedTrees: { x: number; z: number }[] = [];
+		const treeBoxes: THREE.Box3[] = [];
 
-		// Tronco
-		const trunkGeo = new THREE.CylinderGeometry(0.1, 0.1, 2.5);
-		const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8b4513 });
-		const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-		trunk.castShadow = true;
-		trunk.receiveShadow = true;
-		trunk.position.y = 0;
-		tree.add(trunk);
+		function createTree(x: number, z: number) {
+			const tree = new THREE.Group();
 
-		// Folhagem
-		const base = getRandomInRange(0.5, 0.6);
-		const height = getRandomInRange(2, 2.2);
-		const leavesGeo = new THREE.ConeGeometry(base, height, 64);
-		const leavesColor = getRandomLeavesColor();
-		const leavesMat = new THREE.MeshStandardMaterial({ color: leavesColor });
-		const leaves = new THREE.Mesh(leavesGeo, leavesMat);
-		leaves.castShadow = true;
-		leaves.receiveShadow = true;
-		leaves.position.y = 1 + Math.random() * 1.1;
-		tree.add(leaves);
+			// TRONCO
+			const trunkGeo = new THREE.CylinderGeometry(0.1, 0.1, 2.5);
+			const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8b4513 });
+			const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+			trunk.castShadow = true;
+			trunk.receiveShadow = true;
+			trunk.position.y = 0;
+			tree.add(trunk);
 
-		const box = new THREE.Box3().setFromObject(tree);
-		tree.position.set(x, 0, z);
-		placedTrees.push({ x, z });
+			// FOLHAGEM
+			const base = getRandomInRange(0.5, 0.6);
+			const height = getRandomInRange(2, 2.2);
+			const leavesGeo = new THREE.ConeGeometry(base, height, 64);
+			const leavesColor = getRandomLeavesColor();
+			const leavesMat = new THREE.MeshStandardMaterial({ color: leavesColor });
+			const leaves = new THREE.Mesh(leavesGeo, leavesMat);
+			leaves.castShadow = true;
+			leaves.receiveShadow = true;
+			leaves.position.y = 1 + Math.random() * 1.1;
+			tree.add(leaves);
 
-		return tree;
-	}
-	
-	function getRandomLeavesColor(): THREE.Color {
-		const r = getRandomInRange(0.1, 0.2);
-		const g = getRandomInRange(0.6, 0.9);
-		const b = getRandomInRange(0.1, 0.2);
-
-		return new THREE.Color(r, g, b);
-	}
-
-	function getRandomInRange(min: number, max: number): number {
-		return Math.random() * (max - min) + min;
-	}
-
-	function getRandomPosition(min: number, max: number) {
-		return Math.random() * (max - min) + min;
-	}
-
-	function isFarFromCar(x: number, z: number, carX = 0, carZ = 0, minDistance = 25) {
-		const dx = x - carX;
-		const dz = z - carZ;
-		const distance = Math.sqrt(dx * dx + dz * dz);
-		return distance >= minDistance;
-	}
-
-	const minTrees = 750;
-	const maxTrees = 1200;
-	const numberOfTrees = Math.floor(Math.random() * (maxTrees - minTrees + 1)) + minTrees;
-
-	const posMin = -500;
-	const posMax = 500;
-	let treesCount = 0;
-
-	const placedTrees: { x: number; z: number }[] = [];
-	const treeBoxes: THREE.Box3[] = [];
-
-	function isFarFromOtherTrees(x: number, z: number, minDistance = minTreeDistance) {
-		for (const tree of placedTrees) {
-			const dx = x - tree.x;
-			const dz = z - tree.z;
-			const distance = Math.sqrt(dx * dx + dz * dz);
-			if (distance < minDistance) return false;
-		}
-		return true;
-	}
-
-	let attempts = 0;
-	const maxAttempts = numberOfTrees * 10;
-
-	while (treesCount < numberOfTrees && attempts < maxAttempts) {
-		attempts++;
-		const x = getRandomPosition(posMin, posMax);
-		const z = getRandomPosition(posMin, posMax);
-
-		if (isFarFromCar(x, z) && isFarFromOtherTrees(x, z, minTreeDistance)) {
-			const tree = createTree(x, z);
-			scene.add(tree);
+			tree.position.set(x, 0, z);
 			placedTrees.push({ x, z });
-			treesCount++;
+			treeBoxes.push(new THREE.Box3().setFromObject(tree));
+			return tree;
 		}
-	}
+	
+		function getRandomLeavesColor(): THREE.Color {
+			const r = getRandomInRange(0.1, 0.2);
+			const g = getRandomInRange(0.6, 0.9);
+			const b = getRandomInRange(0.1, 0.2);
+
+			return new THREE.Color(r, g, b);
+		}
+
+		function getRandomInRange(min: number, max: number): number {
+			return Math.random() * (max - min) + min;
+		}
+
+		function getRandomPosition(min: number, max: number) {
+			return Math.random() * (max - min) + min;
+		}
+
+		function isFarFromCar(x: number, z: number, carX = 0, carZ = 0, minDistance = 25) {
+			const dx = x - carX;
+			const dz = z - carZ;
+			const distance = Math.sqrt(dx * dx + dz * dz);
+			return distance >= minDistance;
+		}
+
+		const minTrees = 750;
+		const maxTrees = 1200;
+		const numberOfTrees = Math.floor(Math.random() * (maxTrees - minTrees + 1)) + minTrees;
+
+		const posMin = -500;
+		const posMax = 500;
+		let treesCount = 0;
+
+		function isFarFromOtherTrees(x: number, z: number, minDistance = minTreeDistance) {
+			for (const tree of placedTrees) {
+				const dx = x - tree.x;
+				const dz = z - tree.z;
+				const distance = Math.sqrt(dx * dx + dz * dz);
+				if (distance < minDistance) return false;
+			}
+			return true;
+		}
+
+		let attempts = 0;
+		const maxAttempts = numberOfTrees * 10;
+
+		while (treesCount < numberOfTrees && attempts < maxAttempts) {
+			attempts++;
+			const x = getRandomPosition(posMin, posMax);
+			const z = getRandomPosition(posMin, posMax);
+
+			if (isFarFromCar(x, z) && isFarFromOtherTrees(x, z, minTreeDistance)) {
+				const tree = createTree(x, z);
+				scene.add(tree);
+				placedTrees.push({ x, z });
+				treeBoxes.push(new THREE.Box3().setFromObject(tree));
+				treesCount++;
+			}
+		}
 
 	// ===== CHÃO =====
-	const planeGeometry = new THREE.PlaneGeometry(1000, 1000);
-	const textureLoader = new THREE.TextureLoader();
+		const planeGeometry = new THREE.PlaneGeometry(1000, 1000);
+		const textureLoader = new THREE.TextureLoader();
 
-	const planeMaterial = new THREE.MeshStandardMaterial({ color: 0xA39A6D });
-	const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+		const planeMaterial = new THREE.MeshStandardMaterial({ color: 0xA39A6D });
+		const plane = new THREE.Mesh(planeGeometry, planeMaterial);
 
-	plane.rotation.x = -Math.PI / 2;
-	plane.position.y = -0.25;
-	plane.receiveShadow = true;
-	scene.add(plane);
-
-	const keys: Record<string, boolean> = {};
-
-	let lastTime = performance.now();
-	const rotationSpeed = Math.PI;
-
-	const cameraTarget = new THREE.Object3D();
-	scene.add(cameraTarget);
+		plane.rotation.x = -Math.PI / 2;
+		plane.position.y = -0.25;
+		plane.receiveShadow = true;
+		scene.add(plane);
 
 	function animate(time: number) {
 		const delta = (time - lastTime) / 1000;
@@ -395,6 +394,7 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 		// ===== CONTROLES =====
 		let throttle = 0;
 		let brake = 0;
+		let handBrake = keys[" "] ? 1 : 0;
 
 		if (keys["w"] || keys["arrowup"]) throttle = 1;
 		if (keys["s"] || keys["arrowdown"]) {
@@ -405,29 +405,14 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 			}
 		}
 
-		// Freio de mão
-		let handBrake = keys[" "] ? 1 : 0;
-
 		// ===== FORÇAS =====
 			// Força de tração (F = m * a)
 			const engineForce = throttle * accelerationRate * mass;
-
-			// Força de frenagem (considera freio normal + freio de mão)
 			const brakeForceTotal = brake * brakeForce * mass + handBrake * brakeForce * 1.5 * mass;
-
-			// Resistência do ar (quadrática na velocidade)
 			const airResistance = drag * velocity * Math.abs(velocity);
-
-			// Atrito de rolamento (sempre contrário ao movimento)
 			const rolling = rollingResistance * velocity;
-
-			// Força resultante
 			const netForce = engineForce - brakeForceTotal * Math.sign(velocity) - airResistance - rolling;
-
-			// Aceleração final (F = m*a)
 			const netAcceleration = netForce / mass;
-
-			// Atualiza velocidade
 			velocity += netAcceleration * delta;
 
 			// Limites de velocidade
@@ -435,7 +420,7 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 			if (velocity < maxReverseSpeed) velocity = maxReverseSpeed;
 
 			// Se a velocidade for muito baixa, zera (evita drift infinito)
-			if (Math.abs(velocity) < 0.05 && throttle === 0 && brake === 0 && handBrake === 0) {
+			if (Math.abs(velocity) < 0.08 && throttle === 0 && brake === 0 && handBrake === 0) {
 				velocity = 0;
 			}
 
@@ -491,21 +476,29 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 			rearLightMaterialLeft.emissive.set(0x000000);
 		}
 
+		const headLightMaterialRight = headLightRight.material as THREE.MeshStandardMaterial;
+		const headLightMaterialLeft = headLightLeft.material as THREE.MeshStandardMaterial;
+
+		if (headlightsOn) {
+			headLightMaterialRight.color.set(0xFFFFFF);
+			headLightMaterialLeft.color.set(0xFFFFFF);
+			headLightMaterialRight.emissive.set(0xFFFFFF);
+			headLightMaterialRight.emissiveIntensity = 1;
+			headLightMaterialLeft.emissive.set(0xFFFFFF);
+			headLightMaterialLeft.emissiveIntensity = 1;
+		} else {
+			headLightMaterialRight.color.set(0x7F7F7F);
+			headLightMaterialLeft.color.set(0x7F7F7F);
+			headLightMaterialRight.emissive.set(0x000000);
+			headLightMaterialRight.emissiveIntensity = 0;
+			headLightMaterialLeft.emissive.set(0x000000);
+			headLightMaterialLeft.emissiveIntensity = 0;
+		}
+
 		// ===== MOVIMENTO =====
 		const forward = new THREE.Vector3(0, 0, -1).applyEuler(car.rotation).normalize();
 		const moveDistance = velocity * delta;
 		car.position.add(forward.multiplyScalar(moveDistance));
-
-		// ===== COLISÕES =====
-		const carBox = new THREE.Box3().setFromObject(car);
-		for (let i = 0; i < treeBoxes.length; i++) {
-			const treeBox = treeBoxes[i];
-			if (carBox.intersectsBox(treeBox)) {
-				car.position.add(forward.clone().multiplyScalar(-0.5));
-				velocity = 0;
-				break;
-			}
-		}
 
 		// Distância total
 		distanceTraveled += Math.abs(moveDistance);
@@ -551,6 +544,13 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 
 	function onKeyDown(event: KeyboardEvent) {
 		keys[event.key.toLowerCase()] = true;
+		const key = event.key.toLowerCase();
+
+		if (key === "h") {
+			headlightsOn = !headlightsOn;
+		} else {
+			keys[key] = true;
+		}
 	}
 
 	function onKeyUp(event: KeyboardEvent) {
