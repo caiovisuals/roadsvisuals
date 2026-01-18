@@ -10,7 +10,10 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 	const maxCameraOffsetAngle = Math.PI / 40;
 
 	let isRain = false;
-	let rainIntensity = 0;
+	let rainTimer = 0;
+	let nextRainChange = 30 + Math.random() * 50;
+	let rainStrength = 0;
+	let rainSpeed = 25;
 
 	let velocity = 0;
 	let verticalVelocity = 0;
@@ -70,28 +73,76 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 		const skySunsetColor = new THREE.Color(0xe5910b);
 
 	// === CHUVA ===
-		const rainCount = 1000;
+		const rainCount = 90000;
 		const rainGeometry = new THREE.BufferGeometry();
 		const rainPositions = new Float32Array(rainCount * 3);
 
+		const rainArea = 1100;
+		const rainHeight = 150;
+
+		const rainSpeeds = new Float32Array(rainCount);
+
+		const colors = new Float32Array(rainCount * 4);
+
 		for (let i = 0; i < rainCount; i++) {
-			rainPositions[i * 3] = Math.random() * 1000 - 500;
-			rainPositions[i * 3 + 1] = Math.random() * 200 + 20;
-			rainPositions[i * 3 + 2] = Math.random() * 1000 - 500;
+			rainPositions[i * 3] = Math.random() * rainArea - rainArea / 2;
+			rainPositions[i * 3 + 1] = Math.random() * rainHeight;
+			rainPositions[i * 3 + 2] = Math.random() * rainArea - rainArea / 2;
+
+    		colors[i * 4] = 0.666;
+    		colors[i * 4 + 1] = 0.666;
+    		colors[i * 4 + 2] = 0.666;
+    		colors[i * 4 + 3] = 0.35 + Math.random() * 0.1;
 		}
 
 		rainGeometry.setAttribute("position", new THREE.BufferAttribute(rainPositions, 3));
+		rainGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 4));
 
 		const rainMaterial = new THREE.PointsMaterial({
 			color: 0xaaaaaa,
 			size: 0.1,
 			transparent: true,
-			opacity: 0.45,
+			vertexColors: true,
 			sizeAttenuation: true,
 		});
-		
+
 		const rain = new THREE.Points(rainGeometry, rainMaterial);
 		scene.add(rain);
+
+		function updateRain(delta: number) {
+			rainTimer += delta;
+
+			if (rainTimer >= nextRainChange) {
+				isRain = !isRain;
+				rainTimer = 0;
+				nextRainChange = 15 + Math.random() * 25;
+			}
+
+			if (isRain) {
+				rainStrength = Math.min(rainStrength + delta * 0.15, 1);
+			} else {
+				rainStrength = Math.max(rainStrength - delta * 0.15, 0);
+			}
+
+			const positions = rainGeometry.attributes.position as THREE.BufferAttribute;
+
+			for (let i = 0; i < rainCount; i++) {
+				// movimento da gota
+				positions.array[i * 3 + 1] -= rainSpeeds[i] * rainStrength * delta;
+
+				// se cair abaixo do chão, reseta
+				if (positions.array[i * 3 + 1] < 0) {
+				positions.array[i * 3 + 1] = rainHeight;
+
+				// centraliza no carro
+				positions.array[i * 3] = car.position.x + (Math.random() * rainArea - rainArea / 2);
+				positions.array[i * 3 + 2] = car.position.z + (Math.random() * rainArea - rainArea / 2);
+				}
+			}
+
+			positions.needsUpdate = true;
+			rain.visible = rainStrength > 0.05;
+		}
 
 	// === CÂMERA E RENDERER ===
 		const minCameraDistance = 7;
@@ -371,6 +422,9 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 		const timeRatio = gameTime / gameDayDuration;
 		const skyColor = skyDayColor.clone().lerp(skySunsetColor, Math.sin(timeRatio * Math.PI));
 		scene.background = skyColor;
+
+		// ===== CHUVA =====
+		updateRain(delta);
 
 		// ===== LUZ AMBIENTE VARIÁVEL =====
 		const ambientIntensity = THREE.MathUtils.lerp(1, 0.8, Math.sin(timeRatio * Math.PI));
