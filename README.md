@@ -1,6 +1,6 @@
 # ROADSVISUALS
 
-Um jogo experimental inspirado no Slow Roads feito com vite, svelte, alea e threejs. Usando formulas físicas e calculos de movimentos.<br/>
+Um jogo experimental inspirado no Slow Roads feito com vite, svelte, typescript, alea e threejs. Usando formulas físicas e calculos de movimentos.<br/>
 Você pode ficar a vontade para testar o jogo clonando o repositório ou acessando a demo:  
 https://roadsvisuals.vercel.app
 

@@ -17,6 +17,7 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 
 	let velocity = 0;
 	let verticalVelocity = 0;
+	let pitchVelocity = 0;
 	let acceleration = 0;
 
 	const mass = 1350;
@@ -29,7 +30,7 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 	const maxReverseSpeed = -15;
 	const accelerationRate = 10;
 	const dragCoeff = 0.32;  
-	const brakeForce = 40;
+	const brakeForce = 36;
 	const steeringAngle = Math.PI * 2.2;
 	const turnSpeed = 4.2;
 	const drag = 5;
@@ -41,10 +42,14 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 	const minTreeDistance = 12;
 
 	let distanceTraveled = 0;
-	let rotation = 0;
 	let animationFrameId: number;
 
 	const scene = new THREE.Scene();
+
+	const MAP_SIZE = 3000;
+
+	const skidMarks: SkidMark[] = [];
+	let skidTimer = 0;
 
 	let lastTime = performance.now();
 	const cameraTarget = new THREE.Object3D();
@@ -77,8 +82,8 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 		const rainGeometry = new THREE.BufferGeometry();
 		const rainPositions = new Float32Array(rainCount * 3);
 
-		const rainArea = 1100;
-		const rainHeight = 150;
+		const rainArea = MAP_SIZE;
+		const rainHeight = 200;
 
 		const rainSpeeds = new Float32Array(rainCount);
 
@@ -101,15 +106,19 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 		const rainMaterial = new THREE.PointsMaterial({
 			color: 0xaaaaaa,
 			size: 0.1,
+			opacity: 0.8,
 			transparent: true,
 			vertexColors: true,
 			sizeAttenuation: true,
+			depthWrite: false,
 		});
 
 		const rain = new THREE.Points(rainGeometry, rainMaterial);
 		scene.add(rain);
 
 		function updateRain(delta: number) {
+			if (rainStrength < 0.05) return;
+
 			rainTimer += delta;
 
 			if (rainTimer >= nextRainChange) {
@@ -162,6 +171,8 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 	// === SOMBRAS ===
 		renderer.shadowMap.enabled = true;
 		renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+		renderer.shadowMap.autoUpdate = true;
+		renderer.toneMapping = THREE.ACESFilmicToneMapping;
 	
 	// === ILUMINAÇÃO ===
 		const ambientLight = new THREE.AmbientLight(0xffffff, 1);
@@ -187,13 +198,26 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 		const carMaterial = new THREE.MeshStandardMaterial({ 
 			color: 0xff0000,
 			roughness: 0.25,
+			metalness: 0.3,
 		});
-		const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
+
+		const wheelMaterial = new THREE.MeshStandardMaterial({ 
+			color: 0x333333 
+		});
+
 		const rearLightMaterial = new THREE.MeshStandardMaterial({
 			color: 0xFF0000,
 		});
+
 		const headLightMaterial = new THREE.MeshStandardMaterial({
 			color: 0xFFFFFF,
+		});
+
+		const skidBaseMaterial = new THREE.MeshStandardMaterial({
+			color: 0x111111,
+			transparent: true,
+			opacity: 0.0,
+			roughness: 1,
 		});
 
 		// === CORPO DE BAIXO ===
@@ -261,6 +285,46 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 		const frontRightWheel = createFrontWheel(0.95, -1.5);
 		const frontLeftWheel = createFrontWheel(-0.95, -1.5);
 
+		class SkidMark {
+			mesh: THREE.Mesh;
+			life = 1;
+
+			constructor(
+				position: THREE.Vector3,
+				rotationY: number,
+				strength: number
+			) {
+				const geometry = new THREE.PlaneGeometry(0.25, 0.6);
+				const material = skidBaseMaterial.clone();
+
+				material.opacity = THREE.MathUtils.clamp(strength, 0.25, 0.7);
+
+				this.mesh = new THREE.Mesh(geometry, material);
+				this.mesh.rotation.x = -Math.PI / 2;
+				this.mesh.rotation.z = rotationY;
+				this.mesh.position.copy(position);
+				this.mesh.position.y = 0.01;
+
+				this.mesh.receiveShadow = true;
+				scene.add(this.mesh);
+			}
+
+			update(delta: number): boolean {
+				this.life -= delta * 0.25;
+
+				const mat = this.mesh.material as THREE.MeshStandardMaterial;
+				mat.opacity *= 0.77;
+
+				if (this.life <= 0) {
+				scene.remove(this.mesh);
+				this.mesh.geometry.dispose();
+				mat.dispose();
+				return false;
+				}
+				return true;
+			}
+		}
+
 		// === FAROIS ===
 			// FAROIS TRASEIROS
 			const rearlightGeometry = new THREE.BoxGeometry(0.3, 0.1, 0.15);
@@ -315,24 +379,27 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 			const tree = new THREE.Group();
 
 			// TRONCO
-			const trunkGeo = new THREE.CylinderGeometry(0.1, 0.1, 2.5);
+			const trunkbase = getRandomInRange(0.19, 0.075);
+			const trunkGeo = new THREE.CylinderGeometry(trunkbase, 0.1, 2.6);
 			const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8b4513 });
 			const trunk = new THREE.Mesh(trunkGeo, trunkMat);
 			trunk.castShadow = true;
 			trunk.receiveShadow = true;
 			trunk.position.y = 0;
+
 			tree.add(trunk);
 
 			// FOLHAGEM
-			const base = getRandomInRange(0.5, 0.6);
-			const height = getRandomInRange(2, 2.2);
-			const leavesGeo = new THREE.ConeGeometry(base, height, 64);
+			const leavesbase = getRandomInRange(0.65, 0.75);
+			const leavesheight = getRandomInRange(2, 2.4);
+			const leavesGeo = new THREE.ConeGeometry(leavesbase, leavesheight, 96);
 			const leavesColor = getRandomLeavesColor();
 			const leavesMat = new THREE.MeshStandardMaterial({ color: leavesColor });
 			const leaves = new THREE.Mesh(leavesGeo, leavesMat);
 			leaves.castShadow = true;
 			leaves.receiveShadow = true;
 			leaves.position.y = 1 + Math.random() * 1.1;
+
 			tree.add(leaves);
 
 			tree.position.set(x, 0, z);
@@ -364,12 +431,12 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 			return distance >= minDistance;
 		}
 
-		const minTrees = 750;
-		const maxTrees = 1200;
+		const minTrees = 1000;
+		const maxTrees = 2500;
 		const numberOfTrees = Math.floor(Math.random() * (maxTrees - minTrees + 1)) + minTrees;
 
-		const posMin = -500;
-		const posMax = 500;
+		const posMin = -MAP_SIZE / 2;
+		const posMax = MAP_SIZE / 2;
 		let treesCount = 0;
 
 		function isFarFromOtherTrees(x: number, z: number, minDistance = minTreeDistance) {
@@ -400,7 +467,7 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 		}
 
 	// ===== CHÃO =====
-		const planeGeometry = new THREE.PlaneGeometry(1000, 1000);
+		const planeGeometry = new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE);
 		const textureLoader = new THREE.TextureLoader();
 
 		const planeMaterial = new THREE.MeshStandardMaterial({ color: 0xA39A6D });
@@ -463,7 +530,7 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 			// Força de tração (F = m * a)
 			const engineForce = throttle * accelerationRate * mass;
 			const brakeForceTotal = brake * brakeForce * mass + handBrake * brakeForce * 1.5 * mass;
-			const airResistance = drag * velocity * Math.abs(velocity);
+			const airResistance = drag * velocity * velocity * Math.sign(velocity);
 			const rolling = rollingResistance * velocity;
 			const netForce = engineForce - brakeForceTotal * Math.sign(velocity) - airResistance - rolling;
 			const netAcceleration = netForce / mass;
@@ -491,6 +558,12 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 		} else {
 			steering *= 0.8;
 		}
+
+		// ===== SKID DETECTION =====
+		const isSkidding =
+			Math.abs(steering) > 0.5 && Math.abs(velocity) > 10 ||
+			brake > 0.3 ||
+			handBrake > 0;
 
 		// Rotação do carro
 		const turn = steering * steeringAngle * (velocity / maxForwardSpeed);
@@ -525,8 +598,9 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 		} else {
 			rearLightMaterialRight.color.set(0x440000);
 			rearLightMaterialLeft.color.set(0x440000);
-
+			rearLightMaterialRight.emissiveIntensity = 1;
 			rearLightMaterialRight.emissive.set(0x000000);
+			rearLightMaterialLeft.emissiveIntensity = 1;
 			rearLightMaterialLeft.emissive.set(0x000000);
 		}
 
@@ -537,9 +611,9 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 			headLightMaterialRight.color.set(0xFFFFFF);
 			headLightMaterialLeft.color.set(0xFFFFFF);
 			headLightMaterialRight.emissive.set(0xFFFFFF);
-			headLightMaterialRight.emissiveIntensity = 1;
+			headLightMaterialRight.emissiveIntensity = 4;
 			headLightMaterialLeft.emissive.set(0xFFFFFF);
-			headLightMaterialLeft.emissiveIntensity = 1;
+			headLightMaterialLeft.emissiveIntensity = 4;
 		} else {
 			headLightMaterialRight.color.set(0x7F7F7F);
 			headLightMaterialLeft.color.set(0x7F7F7F);
@@ -550,14 +624,37 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 		}
 
 		// ===== MOVIMENTO =====
-		const forward = new THREE.Vector3(0, 0, -1).applyEuler(car.rotation).normalize();
-		const moveDistance = velocity * delta;
-		car.position.add(forward.multiplyScalar(moveDistance));
+		const speedFactor = Math.min(Math.abs(velocity) / maxForwardSpeed, 1)
+		const lateralSlip = steering * speedFactor * 0.03
+		
+		const forward = new THREE.Vector3(0, 0, -1).applyEuler(car.rotation).normalize()
+		const moveDistance = velocity * delta
+		car.position.add(forward.multiplyScalar(moveDistance))
+
+		// ===== SKID MARK CREATION =====
+		skidTimer += delta;
+
+		if (isSkidding && skidTimer > 0.04) {
+			skidTimer = 0;
+
+			const strength =
+				brake > 0 || handBrake > 0
+				? Math.abs(velocity) / maxForwardSpeed
+				: 0.4;
+
+			const leftPos = rearLeftWheel.getWorldPosition(new THREE.Vector3());
+			const rightPos = rearRightWheel.getWorldPosition(new THREE.Vector3());
+
+			skidMarks.push(
+				new SkidMark(leftPos, car.rotation.y, strength),
+				new SkidMark(rightPos, car.rotation.y, strength)
+			);
+		}
 
 		// Distância total
 		distanceTraveled += Math.abs(moveDistance);
 
-		const mapLimit = 500;
+		const mapLimit = MAP_SIZE / 2;
 		if (Math.abs(car.position.x) > mapLimit) { car.position.x = Math.sign(car.position.x) * mapLimit; velocity = 0; }
 		if (Math.abs(car.position.z) > mapLimit) { car.position.z = Math.sign(car.position.z) * mapLimit; velocity = 0; }
 
