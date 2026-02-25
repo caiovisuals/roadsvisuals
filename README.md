@@ -6,11 +6,11 @@ https://roadsvisuals.vercel.app
 
 ## Capturas de Telas
 
-![Menu Principal](assets/screenshots/1.png)
+![Menu Principal](src/assets/screenshots/1.png)
 
-![Modo Solo](assets/screenshots/2.png)
+![Modo Solo](src/assets/screenshots/2.png)
 
-![Modo Multiplayer](assets/screenshots/3.png)
+![Modo Multiplayer](src/assets/screenshots/3.png)
 
 ## Objetivos
 
