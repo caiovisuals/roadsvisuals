@@ -38,6 +38,20 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 	let steering = 0;
 
 	let headlightsOn = true;
+
+	const CAR_COLLISION_RADIUS = 1.2;
+	// Raio de colisão das árvores (tronco + margem)
+	const TREE_COLLISION_RADIUS = 0.45;
+	// Fator de rebote ao bater numa árvore
+	const COLLISION_BOUNCE = 0.35;
+	// Força de empurrar o carro para fora da árvore
+	const COLLISION_PUSH_FORCE = 0.08;
+
+	const COMBINED_RADIUS = CAR_COLLISION_RADIUS + TREE_COLLISION_RADIUS;
+	const COMBINED_RADIUS_SQ = COMBINED_RADIUS * COMBINED_RADIUS;
+
+	// Busca apenas as árvores próximas do carro para evitar O(n) completo
+	const TREE_CHECK_RANGE = COMBINED_RADIUS + 2;
 	
 	const minTreeDistance = 12;
 
@@ -373,6 +387,7 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 
 	// === ARVÓRES ===
 		const placedTrees: { x: number; z: number }[] = [];
+		const treeColliders: { x: number; z: number }[] = [];
 		const treeBoxes: THREE.Box3[] = [];
 
 		function createTree(x: number, z: number) {
@@ -404,6 +419,7 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 
 			tree.position.set(x, 0, z);
 			placedTrees.push({ x, z });
+			treeColliders.push({ x, z });
 			treeBoxes.push(new THREE.Box3().setFromObject(tree));
 			return tree;
 		}
@@ -431,8 +447,8 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 			return distance >= minDistance;
 		}
 
-		const minTrees = 1000;
-		const maxTrees = 2500;
+		const minTrees = 1200;
+		const maxTrees = 3000;
 		const numberOfTrees = Math.floor(Math.random() * (maxTrees - minTrees + 1)) + minTrees;
 
 		const posMin = -MAP_SIZE / 2;
@@ -477,6 +493,31 @@ export async function initScene(canvas: HTMLCanvasElement, updateUI: (speed: num
 		plane.position.y = -0.25;
 		plane.receiveShadow = true;
 		scene.add(plane);
+
+	function resolveTreeCollisions(nextPos: THREE.Vector3): { hit: boolean; pushDir: THREE.Vector3 } {
+		let hit = false;
+		const pushDir = new THREE.Vector3();
+
+		for (const tree of treeColliders) {
+			const dx = nextPos.x - tree.x;
+			const dz = nextPos.z - tree.z;
+			const distSq = dx * dx + dz * dz;
+
+			if (distSq < COMBINED_RADIUS_SQ) {
+				hit = true;
+				const dist = Math.sqrt(distSq) || 0.001;
+				// Direção de empurrão: afastando o carro da árvore
+				const nx = dx / dist;
+				const nz = dz / dist;
+				// Penetração: quanto o carro "entrou" na árvore
+				const penetration = COMBINED_RADIUS - dist;
+				pushDir.x += nx * penetration;
+				pushDir.z += nz * penetration;
+			}
+		}
+
+		return { hit, pushDir };
+	}
 
 	function animate(time: number) {
 		const delta = (time - lastTime) / 1000;
