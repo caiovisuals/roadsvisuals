@@ -4,6 +4,14 @@ Um jogo experimental inspirado no Slow Roads feito com vite, svelte, typescript,
 Você pode ficar a vontade para testar o jogo clonando o repositório ou acessando a demo:  
 https://roadsvisuals.vercel.app
 
+## Capturas de Telas
+
+![Menu Principal](assets/screenshots/1.png)
+
+![Modo Solo](assets/screenshots/2.png)
+
+![Modo Multiplayer](assets/screenshots/3.png)
+
 ## Objetivos
 
 - Estudar e aplicar movimento físico em ambientes 3D
